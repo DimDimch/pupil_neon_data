@@ -1,0 +1,5 @@
+pygame>=2.5.0
+pupil-labs-realtime-api>=1.8.0
+simpleobsws>=1.0.0
+imageio[ffmpeg]>=2.34.0
+numpy

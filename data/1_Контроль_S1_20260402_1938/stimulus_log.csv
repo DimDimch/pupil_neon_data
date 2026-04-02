@@ -1,0 +1,9 @@
+# METADATA
+Subject_ID,1
+Group,Контроль
+Age,
+Gender,М
+Session,1
+View_Dist,62.5
+
+task_name,dot_type,dot_color,dot_is_correct,t_start,t_end,x_px,y_px
