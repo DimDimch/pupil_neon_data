@@ -29,6 +29,22 @@ from typing import Any
 import pygame
 import simpleobsws
 
+# ─── FIX SSL: отключаем SSL по умолчанию для aiohttp ───
+# Pupil Neon API работает по HTTP, но aiohttp может пытаться SSL.
+try:
+    import aiohttp
+    _orig_tcp_connector_init = aiohttp.TCPConnector.__init__
+
+    def _patched_tcp_connector_init(self, *args, **kwargs):
+        if "ssl" not in kwargs:
+            kwargs["ssl"] = False
+        _orig_tcp_connector_init(self, *args, **kwargs)
+
+    aiohttp.TCPConnector.__init__ = _patched_tcp_connector_init
+except Exception:
+    pass
+# ─── конец FIX SSL ───
+
 from pupil_labs.realtime_api.device import Device
 from pupil_labs.realtime_api.time_echo import TimeOffsetEstimator
 
@@ -784,6 +800,41 @@ async def main():
 
     try:
         device = Device(address=current_ip, port=8080)
+
+        # ─── FIX: отключаем SSL для aiohttp (API работает по HTTP) ───
+        # Некоторые версии aiohttp по умолчанию пытаются SSL,
+        # что вызывает "ssl:default [No route to host]".
+        try:
+            import aiohttp
+            import ssl as _ssl
+
+            # Вариант 1: подменяем внутреннюю сессию Device
+            if hasattr(device, "_session") and device._session is not None:
+                await device._session.close()
+                connector = aiohttp.TCPConnector(ssl=False)
+                device._session = aiohttp.ClientSession(connector=connector)
+            elif hasattr(device, "_api"):
+                # Вариант 2: у Device есть _api объект с сессией
+                api = device._api
+                if hasattr(api, "_session") and api._session is not None:
+                    await api._session.close()
+                    connector = aiohttp.TCPConnector(ssl=False)
+                    api._session = aiohttp.ClientSession(connector=connector)
+
+            # Вариант 3: патчим base_url чтобы точно был http://
+            for obj in (device, getattr(device, "_api", None)):
+                if obj is None:
+                    continue
+                for attr in ("_base_url", "base_url", "_api_url"):
+                    url = getattr(obj, attr, None)
+                    if url and isinstance(url, str) and url.startswith("https://"):
+                        setattr(obj, attr, url.replace("https://", "http://", 1))
+                        print(f"  [FIX] {attr}: https → http")
+
+        except Exception as ssl_fix_err:
+            print(f"  [FIX] SSL-патч не применён (не критично): {ssl_fix_err}")
+        # ─── конец FIX ───
+
         async with asyncio.timeout(5.0):
             await device.get_status()
         print(f"✅ Устройство успешно подключено: {current_ip}")
@@ -791,6 +842,10 @@ async def main():
         print(f"❌ ОШИБКА: Не удалось подключиться к {current_ip}:8080.")
         print(f"Детали ошибки: {e}")
         print("Проверьте, что телефон и компьютер в одной Wi-Fi сети.")
+        print("\n💡 Попробуйте также:")
+        print("   1. Откройте в браузере http://{current_ip}:8080/status")
+        print("   2. Если открывается — проблема в SSL, обновите aiohttp:")
+        print("      pip install aiohttp==3.9.5")
         logfile.close()
         return
 
